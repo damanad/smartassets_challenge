@@ -1,3 +1,6 @@
+import pandas as pd
+import numpy as np
+from typing import Tuple
 from sklearn.metrics import accuracy_score, roc_auc_score, precision_score, recall_score, f1_score
 from sklearn.preprocessing import LabelEncoder, StandardScaler
 import lightgbm as lgb
@@ -92,7 +95,15 @@ class CreativeEffectivenessModel:
             self.features = features
             self.target = target
         
-    def train(self, train_data, verbose=True):
+    def train(self, train_data: pd.DataFrame, verbose: bool = True):
+        """
+        Train model with train_data
+        Args:
+            train_data (pd.DataFrame): Input data used for training containing the
+                        features required by the model.
+            verbose (bool): Print training metrics (if set/available by the model)
+                    and test metrics. Default is True
+        """
         X_train = self.preprocess_fit(train_data[self.features].copy())
         y_train = train_data[self.target].values
         # Train the model
@@ -128,7 +139,19 @@ class CreativeEffectivenessModel:
                             f'Loss: {running_loss/len(dataloader):.4f}')
         
             
-    def eval(self, test_data, threshold=0.5, verbose=True):
+    def eval(self, test_data: pd.DataFrame, threshold: float = 0.5,
+             verbose=True) -> dict:
+        """
+        Evaluates the trained mode to the test_data
+        Args:
+            test_data (pd.DataFrame): Input data containing the required features
+            threshold (float, optional): The threshold for classifying a positive 
+                                     class. Defaults to 0.5.
+            verbose (bool): Print training metrics (if set/available by the model)
+                    and test metrics. Default is True
+        Returns:
+            dict: The test error/performance classification metrics
+        """
         test_data = test_data.copy()
         y_pred, y_pred_proba = self.predict(test_data, threshold=threshold)
         y_test = test_data[self.target]
@@ -153,11 +176,37 @@ class CreativeEffectivenessModel:
             print(f"F1 Score: {f1:.3f}")
         return metrics
         
-    def train_eval(self, train_data, test_data, verbose=True):
+    def train_eval(self, train_data: pd.DataFrame, test_data: pd.DataFrame,
+                   verbose: bool = True) -> dict:
+        """
+        Train model with train_data and evaluate with test_data
+        Args:
+            train_data (pd.DataFrame): Input data used for training containing the
+                        features required by the model.
+            test_data (pd.DataFrame): Input data used for evaluation containing the
+                    features required by the model.
+            verbose (bool): Print training metrics (if set/available by the model)
+                    and test metrics. Default is True
+        Returns:
+            dict: The test error/performance classification metrics
+        """
         self.train(train_data, verbose=verbose)
         return self.eval(test_data, verbose=verbose)
         
-    def predict(self, data, threshold=0.5):
+    def predict(self, data: pd.DataFrame, threshold: float = 0.5) -> Tuple[np.ndarray, np.ndarray]:
+        """
+        Generate predictions and prediction probabilities for the input data.
+        Args:
+            data (pd.DataFrame): Input data containing the features required by the model.
+                             It must include all the features specified in `self.features`.
+            threshold (float, optional): The threshold for classifying a positive 
+                                     class. Defaults to 0.5.
+
+        Returns:
+            Tuple: 
+            - np.ndarray: Binary predictions (0 or 1) based on the threshold.
+            - np.ndarray: The predicted probabilities for the positive class.
+        """
         X = self.preprocess(data[self.features].copy())
         if self.model_class in ['lgbm', 'nb']:
             y_pred_proba = self.model.predict_proba(X)
@@ -170,11 +219,24 @@ class CreativeEffectivenessModel:
         y_pred = (y_pred_proba >= threshold).astype(int)
         return y_pred, y_pred_proba
 
-    def preprocess_fit(self, train_data):
-        if ('country' in train_data.columns):
-            self.label_encoder = LabelEncoder()
-            self.label_encoder.fit(train_data['country'])
-            train_data['country'] = self.label_encoder.transform(train_data['country'])
+    def preprocess_fit(self, train_data: pd.DataFrame) -> np.array:
+        """
+        Fit the preprocessing components and transform the input training data
+        (label encoding and scaling (if necessary)).
+
+        Args:
+            train_data (pd.DataFrame): The input data to preprocess
+    
+        Returns:
+            np.ndarray: The preprocessed data.
+        """
+        label_encoded = train_data.select_dtypes(include='object').columns
+        self.label_encoder = {}
+        for feat in label_encoded:
+            self.label_encoder[feat] = LabelEncoder()
+            self.label_encoder[feat].fit(train_data[feat])
+            train_data[feat] = self.label_encoder[feat].transform(train_data[feat])
+      
         if self.model_class in ['nn1', 'nn2']:
             self.scaler = StandardScaler()
             self.scaler.fit(train_data)
@@ -182,19 +244,42 @@ class CreativeEffectivenessModel:
         else:
             return train_data.values
         
-    def preprocess(self, data):
-        if ('country' in data.columns):
-            data['country'] = self.label_encoder.transform(data['country'])
+    def preprocess(self, data: pd.DataFrame) -> np.array:
+        """
+        Preprocess the input data by applying label encoding and scaling (if necessary).
+
+        Args:
+            data (pd.DataFrame): The input data to preprocess
+    
+        Returns:
+            np.ndarray: The preprocessed data.
+        """
+        for feat in self.label_encoder.keys():
+            # note that this will rise error if a category was not present when fitting
+            data[feat] = self.label_encoder[feat].transform(data[feat])
+            
         if self.model_class in ['nn1', 'nn2']:
             return self.scaler.transform(data)
         else:
             return data.values
 
-    def save(self, path):
+    def save(self, path: str):
+        """
+        Save the model (serializes attributes in dict and pickles them).
+        We assume this is a local path but with the proper connector this could be cloud storage.
+        Args:
+            path (str): The file path where the model's attributes will be saved.
+        """
         with open(path, mode='wb') as pfile:
             pk.dump(self.__dict__, pfile)
             
-    def load(self, path):
+    def load(self, path: str):
+        """
+        Load the model (from pickle, sets the attributes of the class).
+        We assume this is a local path but with the proper connector this could be cloud storage.
+        Args:
+            path (str): The file path where the model's attributes is saved.
+        """
         with open(path, mode='rb') as pfile:
             attributes = pk.load(pfile)
             self.__dict__.update(attributes)
